@@ -6,7 +6,7 @@ import (
 	"io"
 	"errors"
 	"context"
-	"github.com/augneb/utils"
+	"github.com/augneb/util"
 )
 
 type Tcp struct {
@@ -48,16 +48,16 @@ func (t *Tcp) Write(b []byte) (int, error) {
 	return t.conn.Write(b)
 }
 
-func (t *Tcp) Read(ctx context.Context, call utils.ReadPackageCall) error {
+func (t *Tcp) Read(ctx context.Context, call util.ReadPackageCall) error {
 	if t.closed {
 		return errors.New("connection has be closed")
 	}
 
 	var e error
 	if t.packEofLen == 0 {
-		e = utils.ReadPackage(ctx, t.conn, call)
+		e = util.ReadPackage(ctx, t.conn, call)
 	} else {
-		e = utils.ReadPackage(ctx, t.conn, call, t.packageEof)
+		e = util.ReadPackage(ctx, t.conn, call, t.packageEof)
 	}
 
 	if e == io.EOF {
