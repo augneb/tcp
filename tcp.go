@@ -2,8 +2,6 @@ package tcp
 
 import (
 	"net"
-	"time"
-	"io"
 	"errors"
 	"context"
 	"github.com/augneb/util"
@@ -11,77 +9,85 @@ import (
 
 type Tcp struct {
 	conn        net.Conn
+	rch         chan []byte
+	inUse       bool
 	closed      bool
 	packageEof  []byte
 	packEofLen  int
 }
 
-func NewTcp(dsn string, timeout ...time.Duration) (*Tcp, error) {
-	var conn net.Conn
-	var err error
+var (
+	errConnClosed = errors.New("connection has be closed")
+	errCancelled = errors.New("user cancelled")
+)
 
-	if len(timeout) > 0 && timeout[0] > 0 {
-		conn, err = net.DialTimeout("tcp", dsn, timeout[0])
-	} else {
-		conn, err = net.Dial("tcp", dsn)
-	}
+func NewTcp(dsn string, packEof ...interface{}) (*Tcp, error) {
+	addr, _ := net.ResolveTCPAddr("tcp", dsn)
+	conn, err := net.DialTCP("tcp", nil, addr)
 
 	if err != nil {
 		return nil, err
 	}
 
-	return &Tcp{conn: conn}, nil
-}
+	t := &Tcp{conn: conn, rch: make(chan []byte)}
 
-func (t *Tcp) SetPackageEof(eof []byte) *Tcp {
-	t.packageEof = eof
-	t.packEofLen = len(eof)
+	if len(packEof) > 0 {
+		switch packEof[0].(type) {
+		case string:
+			t.packageEof = []byte(packEof[0].(string))
+		case []byte:
+			t.packageEof = packEof[0].([]byte)
+		}
 
-	return t
+		t.packEofLen = len(t.packageEof)
+	}
+
+	go t.loopRead()
+
+	return t, nil
 }
 
 func (t *Tcp) Write(b []byte) (int, error) {
 	if t.closed {
-		return 0, errors.New("connection has be closed")
+		return 0, errConnClosed
 	}
+
+	if t.inUse || len(t.rch) > 0 {
+		util.Println("t: write error", "blue")
+		t.Close()
+	}
+
+	t.inUse = true
 
 	return t.conn.Write(b)
 }
 
 func (t *Tcp) Read(ctx context.Context, call util.ReadPackageCall) error {
 	if t.closed {
-		return errors.New("connection has be closed")
+		return errConnClosed
 	}
 
-	var e error
-	if t.packEofLen == 0 {
-		e = util.ReadPackage(ctx, t.conn, call)
-	} else {
-		e = util.ReadPackage(ctx, t.conn, call, t.packageEof)
+	next := false
+	for {
+		select {
+		case pack := <-t.rch:
+			next = call(pack)
+		case <-ctx.Done():
+			return errCancelled
+		}
+
+		if !next {
+			break
+		}
 	}
 
-	if e == io.EOF {
-		t.Close()
-	}
+	t.inUse = false
 
-	return e
+	return nil
 }
 
 func (t *Tcp) IsValid() bool {
-	if t.closed {
-		return false
-	}
-
-	t.conn.SetReadDeadline(time.Now())
-	if n, err := t.conn.Read([]byte{}); err == io.EOF || n > 0 {
-		t.Close()
-		return false
-	}
-
-	var zero time.Time
-	t.conn.SetReadDeadline(zero)
-
-	return true
+	return !t.closed
 }
 
 func (t *Tcp) Close() error {
@@ -89,3 +95,31 @@ func (t *Tcp) Close() error {
 	return t.conn.Close()
 }
 
+func (t *Tcp) loopRead() {
+	eof := []interface{}{}
+	if t.packEofLen > 0 {
+		eof = []interface{}{t.packageEof}
+	}
+
+	err := util.ReadPackage(context.Background(), t.conn, func(pack []byte) bool {
+		// 有脏数据
+		if !t.inUse {
+			util.Println("t: data error", "blue")
+			t.Close()
+			return false
+		}
+
+		t.rch <- pack
+
+		if t.closed {
+			return false
+		}
+
+		return true
+	}, eof...)
+
+	if err != nil {
+		util.Println("t: end error", err.Error(), "blue")
+		t.Close()
+	}
+}
