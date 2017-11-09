@@ -53,7 +53,6 @@ func (t *Tcp) Write(b []byte) (int, error) {
 	}
 
 	if t.inUse || len(t.rch) > 0 {
-		util.Println("t: write error", "blue")
 		t.Close()
 	}
 
@@ -104,7 +103,6 @@ func (t *Tcp) loopRead() {
 	err := util.ReadPackage(context.Background(), t.conn, func(pack []byte) bool {
 		// 有脏数据
 		if !t.inUse {
-			util.Println("t: data error", "blue")
 			t.Close()
 			return false
 		}
@@ -119,7 +117,6 @@ func (t *Tcp) loopRead() {
 	}, eof...)
 
 	if err != nil {
-		util.Println("t: end error", err.Error(), "blue")
 		t.Close()
 	}
 }
