@@ -17,8 +17,8 @@ type Tcp struct {
 }
 
 var (
-	errConnClosed = errors.New("connection has be closed")
-	errCancelled = errors.New("user cancelled")
+	ErrConnClosed = errors.New("connection has be closed")
+	ErrCancelled  = errors.New("user cancelled")
 )
 
 func NewTcp(dsn string, packEof ...interface{}) (*Tcp, error) {
@@ -49,7 +49,7 @@ func NewTcp(dsn string, packEof ...interface{}) (*Tcp, error) {
 
 func (t *Tcp) Write(b []byte) (int, error) {
 	if t.closed {
-		return 0, errConnClosed
+		return 0, ErrConnClosed
 	}
 
 	if t.inUse || len(t.rch) > 0 {
@@ -63,16 +63,20 @@ func (t *Tcp) Write(b []byte) (int, error) {
 
 func (t *Tcp) Read(ctx context.Context, call util.ReadPackageCall) error {
 	if t.closed {
-		return errConnClosed
+		return ErrConnClosed
 	}
 
 	next := false
 	for {
 		select {
 		case pack := <-t.rch:
+			if len(pack) == 0 && t.closed {
+				return ErrConnClosed
+			}
+
 			next = call(pack)
 		case <-ctx.Done():
-			return errCancelled
+			return ErrCancelled
 		}
 
 		if !next {
@@ -100,7 +104,7 @@ func (t *Tcp) loopRead() {
 		eof = []interface{}{t.packageEof}
 	}
 
-	err := util.ReadPackage(context.Background(), t.conn, func(pack []byte) bool {
+	err := util.ReadPackage(nil, t.conn, func(pack []byte) bool {
 		// 有脏数据
 		if !t.inUse {
 			t.Close()
@@ -118,5 +122,6 @@ func (t *Tcp) loopRead() {
 
 	if err != nil {
 		t.Close()
+		t.rch <- []byte{}
 	}
 }
