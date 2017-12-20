@@ -8,17 +8,18 @@ import (
 )
 
 type Tcp struct {
-	conn        net.Conn
-	rch         chan []byte
-	inUse       bool
-	closed      bool
-	packageEof  []byte
-	packEofLen  int
+	conn       net.Conn
+	rch        chan []byte
+	inUse      bool
+	closed     bool
+	packageEof []byte
+	packEofLen int
 }
 
 var (
-	ErrConnClosed = errors.New("connection has be closed")
-	ErrCancelled  = errors.New("user cancelled")
+	ErrCancelled        = errors.New("user cancelled")
+	ErrConnClosed       = errors.New("connection has be closed")
+	ErrUnknownException = errors.New("unknown exception")
 )
 
 func NewTcp(dsn string, packEof ...interface{}) (*Tcp, error) {
@@ -54,6 +55,7 @@ func (t *Tcp) Write(b []byte) (int, error) {
 
 	if t.inUse || len(t.rch) > 0 {
 		t.Close()
+		return 0, ErrUnknownException
 	}
 
 	t.inUse = true
